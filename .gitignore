@@ -1,0 +1,43 @@
+# Binaries for programs and plugins
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary, coverage, and profiling output
+*.test
+*.out
+*.cover
+coverage.out
+*.prof
+
+# Build directories
+bin/
+obj/
+
+# Go workspace local directories
+**/pkg/mod/
+**/pkg/sumdb/
+
+# IDE/editor metadata
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# OS metadata
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Temporary files
+*~
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# Local log files
+*.log
