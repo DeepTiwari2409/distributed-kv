@@ -55,9 +55,7 @@ func NewRaftNode(node *Node, peers []NodeID, transport Transport, clock Clock, e
 
 func (rn *RaftNode) newElectionTimer() Timer {
 	return rn.clock.NewTimer(rn.randomElectionTimeout(), func() {
-		rn.mu.Lock()
 		rn.startElection()
-		rn.mu.Unlock()
 	})
 }
 
@@ -155,6 +153,9 @@ func (rn *RaftNode) hasMajorityVotes() bool {
 }
 
 func (rn *RaftNode) startElection() {
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+
 	rn.node.AdvanceTerm(rn.node.CurrentTerm() + 1)
 	rn.node.SetState(Candidate)
 	rn.node.SetVotedFor(rn.node.ID())
@@ -174,6 +175,7 @@ func (rn *RaftNode) startElection() {
 	}
 	peers := append([]NodeID(nil), rn.peers...)
 	transport := rn.transport
+
 	rn.mu.Unlock()
 	for _, peerID := range peers {
 		transport.SendRequestVote(request, peerID)
