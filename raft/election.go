@@ -47,6 +47,8 @@ type RaftNode struct {
 	sentLastIndex      map[NodeID]uint64
 	electionTerm       uint64
 	stopped            bool
+	stateMachine       StateMachine
+	applicationError   error
 	started            bool
 }
 

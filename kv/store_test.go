@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"sync"
 	"testing"
+
+	"github.com/DeepTiwari2409/distributed-kv/raft"
 )
 
 func TestNewStore(t *testing.T) {
@@ -13,6 +15,22 @@ func TestNewStore(t *testing.T) {
 	}
 	if _, ok := s.Get("missing"); ok {
 		t.Fatal("expected empty store")
+	}
+}
+
+func TestApplyRaftCommands(t *testing.T) {
+	s := NewStore()
+	if err := s.Apply(raft.NewPutCommand("key", []byte("value"))); err != nil {
+		t.Fatal(err)
+	}
+	if value, ok := s.Get("key"); !ok || !bytes.Equal(value, []byte("value")) {
+		t.Fatal("PUT command was not applied")
+	}
+	if err := s.Apply(raft.NewDeleteCommand("key")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Get("key"); ok {
+		t.Fatal("DELETE command was not applied")
 	}
 }
 

@@ -200,6 +200,9 @@ func (rn *RaftNode) handleAppendEntries(request AppendEntriesRequest) AppendEntr
 		}
 		break
 	}
+	if err := rn.advanceFollowerCommit(request.LeaderCommit); err != nil {
+		return AppendEntriesResponse{Term: rn.node.CurrentTerm(), Success: true}
+	}
 	rn.resetElectionTimer()
 	return AppendEntriesResponse{Term: rn.node.CurrentTerm(), Success: true}
 }
@@ -231,6 +234,7 @@ func (rn *RaftNode) handleAppendEntriesResponse(response AppendEntriesResponse, 
 		if rn.nextIndex[from] < rn.matchIndex[from]+1 {
 			rn.nextIndex[from] = rn.matchIndex[from] + 1
 		}
+		rn.advanceCommitIndex()
 		return
 	}
 	if rn.nextIndex[from] > rn.matchIndex[from]+1 {

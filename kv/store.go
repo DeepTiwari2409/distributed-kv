@@ -1,6 +1,10 @@
 package kv
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/DeepTiwari2409/distributed-kv/raft"
+)
 
 type Store struct {
 	mu sync.RWMutex
@@ -46,6 +50,18 @@ func (s *Store) Delete(key string) bool {
 	}
 	delete(s.m, key)
 	return true
+}
+
+func (s *Store) Apply(command raft.Command) error {
+	switch command.Type {
+	case raft.CommandPut:
+		return s.Put(command.Key, command.Value)
+	case raft.CommandDelete:
+		s.Delete(command.Key)
+		return nil
+	default:
+		return raft.ErrInvalidCommandType
+	}
 }
 
 func cloneBytes(value []byte) []byte {
