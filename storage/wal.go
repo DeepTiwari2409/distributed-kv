@@ -12,7 +12,7 @@ import (
 
 const (
 	walHeaderSize    = 8
-	maxRecordPayload = 64 << 20 // 64 MiB
+	maxRecordPayload = 64 << 20
 )
 
 var (
@@ -23,7 +23,6 @@ var (
 	ErrRecordTooLarge    = errors.New("record too large")
 )
 
-// RecordType describes the kind of WAL operation.
 type RecordType uint8
 
 const (
@@ -31,20 +30,11 @@ const (
 	RecordDelete RecordType = 2
 )
 
-// Record is a logical WAL entry for a mutation.
-//
-// The WAL stores operations in append order. PUT records contain both a key
-// and value. DELETE records contain only a key.
 type Record struct {
 	Type  RecordType
 	Key   string
 	Value []byte
 }
-
-// WAL provides a durable append-only write-ahead log.
-//
-// Append is safe for concurrent use. Replay is serialized with append and close
-// to ensure it never observes a partially written record.
 type WAL struct {
 	mu     sync.Mutex
 	file   *os.File
@@ -52,8 +42,6 @@ type WAL struct {
 	closed bool
 }
 
-// Open opens an existing WAL file or creates a new one when the file does not exist.
-// The WAL is opened for append and replay without truncating existing data.
 func Open(path string) (*WAL, error) {
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
@@ -65,11 +53,6 @@ func Open(path string) (*WAL, error) {
 	}
 	return &WAL{file: file, path: path}, nil
 }
-
-// Append writes a record to the WAL.
-//
-// A successful Append means the record bytes have been written to the WAL file.
-// Durability to physical media is provided by Sync.
 func (w *WAL) Append(record Record) error {
 	if err := validateRecord(record); err != nil {
 		return err
@@ -92,8 +75,6 @@ func (w *WAL) Append(record Record) error {
 	}
 	return nil
 }
-
-// Sync flushes WAL contents to durable storage.
 func (w *WAL) Sync() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -105,11 +86,6 @@ func (w *WAL) Sync() error {
 	}
 	return nil
 }
-
-// Replay returns all complete WAL records in append order.
-//
-// If the WAL contains an incomplete final record, Replay returns all complete
-// records before the tail and ErrIncompleteTail.
 func (w *WAL) Replay() ([]Record, error) {
 	w.mu.Lock()
 	if w.closed {
@@ -136,8 +112,6 @@ func (w *WAL) Replay() ([]Record, error) {
 	}
 	return records, nil
 }
-
-// Close closes the WAL file. Subsequent operations return ErrClosed.
 func (w *WAL) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -188,7 +162,6 @@ func encodeRecord(record Record) ([]byte, error) {
 
 	buf := make([]byte, walHeaderSize+payloadLen)
 	binary.BigEndian.PutUint32(buf[0:4], uint32(payloadLen))
-	// checksum is written after payload is filled.
 	off := walHeaderSize
 	buf[off] = byte(record.Type)
 	off++

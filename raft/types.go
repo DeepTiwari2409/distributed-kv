@@ -5,10 +5,6 @@ import (
 	"fmt"
 )
 
-// NodeID uniquely identifies a Raft node.
-//
-// NodeIDs are comparable and may be used as map keys.
-// A NodeID of 0 represents no node or no vote.
 type NodeID uint64
 
 const NoNode NodeID = 0
@@ -24,9 +20,6 @@ func (id NodeID) String() string {
 	return fmt.Sprintf("%d", uint64(id))
 }
 
-// State describes the Raft role of a node.
-//
-// The state values are explicitly typed and not represented as strings.
 type State uint8
 
 const (
@@ -57,9 +50,6 @@ func (s State) Valid() bool {
 	}
 }
 
-// CommandType describes the KV state-machine operation.
-//
-// The values are explicit and allow invalid types to be detected.
 type CommandType uint8
 
 const (
@@ -78,22 +68,15 @@ func (ct CommandType) String() string {
 	}
 }
 
-// Command represents intent for the KV state machine.
-//
-// It is a data-only model, not an executor of KV operations.
-// Empty keys and empty values are valid. Nil values are distinct from empty values.
 type Command struct {
 	Type  CommandType
 	Key   string
 	Value []byte
 }
 
-// NewPutCommand constructs a PUT command with a defensive copy of value.
 func NewPutCommand(key string, value []byte) Command {
 	return Command{Type: CommandPut, Key: key, Value: cloneBytes(value)}
 }
-
-// NewDeleteCommand constructs a DELETE command.
 func NewDeleteCommand(key string) Command {
 	return Command{Type: CommandDelete, Key: key}
 }
@@ -111,10 +94,6 @@ func (c Command) copy() Command {
 	return Command{Type: c.Type, Key: c.Key, Value: cloneBytes(c.Value)}
 }
 
-// LogEntry is an immutable Raft log element.
-//
-// Index is the one-based logical position in the Raft log.
-// Term is the election term for this entry.
 type LogEntry struct {
 	Index   uint64
 	Term    uint64

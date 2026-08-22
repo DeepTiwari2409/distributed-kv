@@ -5,10 +5,6 @@ import (
 	"sync"
 )
 
-// Node holds the core Raft persistent and volatile state.
-//
-// This model is intentionally limited to state only and does not implement
-// election or replication logic.
 type Node struct {
 	mu sync.RWMutex
 
@@ -22,7 +18,6 @@ type Node struct {
 	lastApplied uint64
 }
 
-// NewNode constructs a Raft node with the given identity.
 func NewNode(id NodeID) (*Node, error) {
 	if !id.Valid() {
 		return nil, ErrInvalidNodeID
@@ -79,8 +74,6 @@ func (n *Node) Log() *RaftLog {
 	defer n.mu.RUnlock()
 	return n.log.Clone()
 }
-
-// AdvanceTerm updates the current term. Term may only move forward.
 func (n *Node) AdvanceTerm(term uint64) error {
 	if term == 0 {
 		return ErrInvalidTerm
@@ -96,8 +89,6 @@ func (n *Node) AdvanceTerm(term uint64) error {
 	}
 	return nil
 }
-
-// SetVotedFor records the candidate this node voted for in the current term.
 func (n *Node) SetVotedFor(candidate NodeID) error {
 	if candidate != NoNode && !candidate.Valid() {
 		return ErrInvalidNodeID
@@ -110,8 +101,6 @@ func (n *Node) SetVotedFor(candidate NodeID) error {
 	n.votedFor = candidate
 	return nil
 }
-
-// SetState transitions the node state without protocol logic.
 func (n *Node) SetState(state State) error {
 	if !state.Valid() {
 		return ErrInvalidState
@@ -121,8 +110,6 @@ func (n *Node) SetState(state State) error {
 	n.state = state
 	return nil
 }
-
-// AdvanceCommitIndex moves commitIndex forward only.
 func (n *Node) AdvanceCommitIndex(index uint64) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -138,8 +125,6 @@ func (n *Node) AdvanceCommitIndex(index uint64) error {
 	}
 	return nil
 }
-
-// AdvanceLastApplied moves lastApplied up to commitIndex only.
 func (n *Node) AdvanceLastApplied(index uint64) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -152,8 +137,6 @@ func (n *Node) AdvanceLastApplied(index uint64) error {
 	n.lastApplied = index
 	return nil
 }
-
-// AppendEntry adds a new log entry to the node's log.
 func (n *Node) AppendEntry(entry LogEntry) error {
 	if err := entry.Command.Validate(); err != nil {
 		return err

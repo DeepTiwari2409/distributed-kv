@@ -633,7 +633,6 @@ func TestRecoveryWithTruncatedTail(t *testing.T) {
 }
 
 func TestFuzzDecodeReplay(t *testing.T) {
-	// Basic negative test to ensure malformed bytes do not panic.
 	data := []byte("not a wal")
 	records, err := readRecords(bytes.NewReader(data))
 	if err == nil {
