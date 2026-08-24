@@ -149,7 +149,12 @@ func (rn *RaftNode) handleAppendEntries(request AppendEntriesRequest) AppendEntr
 		return AppendEntriesResponse{Term: rn.node.CurrentTerm(), Success: false}
 	}
 	if request.Term > rn.node.CurrentTerm() {
+		oldTerm, oldVote := rn.node.CurrentTerm(), rn.node.VotedFor()
 		rn.node.AdvanceTerm(request.Term)
+		if err := rn.persistState(); err != nil {
+			rn.restoreDurableState(oldTerm, oldVote, rn.node.Log())
+			return AppendEntriesResponse{Term: oldTerm, Success: false}
+		}
 		rn.node.SetState(Follower)
 		rn.stopHeartbeats()
 		rn.resetElectionTimer()
@@ -177,6 +182,7 @@ func (rn *RaftNode) handleAppendEntries(request AppendEntriesRequest) AppendEntr
 			return AppendEntriesResponse{Term: rn.node.CurrentTerm(), Success: false}
 		}
 	}
+	previousLog := rn.node.Log()
 	for offset, incoming := range request.Entries {
 		index := request.PrevLogIndex + uint64(offset) + 1
 		if index <= rn.node.Log().LastIndex() {
@@ -200,6 +206,12 @@ func (rn *RaftNode) handleAppendEntries(request AppendEntriesRequest) AppendEntr
 		}
 		break
 	}
+	if len(request.Entries) > 0 {
+		if err := rn.persistState(); err != nil {
+			rn.restoreDurableState(rn.node.CurrentTerm(), rn.node.VotedFor(), previousLog)
+			return AppendEntriesResponse{Term: rn.node.CurrentTerm(), Success: false}
+		}
+	}
 	if err := rn.advanceFollowerCommit(request.LeaderCommit); err != nil {
 		return AppendEntriesResponse{Term: rn.node.CurrentTerm(), Success: true}
 	}
@@ -208,7 +220,12 @@ func (rn *RaftNode) handleAppendEntries(request AppendEntriesRequest) AppendEntr
 }
 func (rn *RaftNode) handleAppendEntriesResponse(response AppendEntriesResponse, from NodeID) {
 	if response.Term > rn.node.CurrentTerm() {
+		oldTerm, oldVote := rn.node.CurrentTerm(), rn.node.VotedFor()
 		rn.node.AdvanceTerm(response.Term)
+		if err := rn.persistState(); err != nil {
+			rn.restoreDurableState(oldTerm, oldVote, rn.node.Log())
+			return
+		}
 		rn.node.SetState(Follower)
 		rn.stopHeartbeats()
 		rn.resetElectionTimer()

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/DeepTiwari2409/distributed-kv/storage"
 )
 
 type RequestVoteRequest struct {
@@ -50,6 +52,8 @@ type RaftNode struct {
 	stateMachine       StateMachine
 	applicationError   error
 	started            bool
+	storage            storage.RaftStateStore
+	storageError       error
 }
 
 func NewRaftNode(node *Node, peers []NodeID, transport Transport, clock Clock, timeouts ...time.Duration) (*RaftNode, error) {
@@ -89,6 +93,88 @@ func NewRaftNode(node *Node, peers []NodeID, transport Transport, clock Clock, t
 	rn.electionTimer = ran
 	rn.resetElectionTimer()
 	return rn, nil
+}
+
+func NewRaftNodeWithStorage(node *Node, peers []NodeID, transport Transport, clock Clock, stateStore storage.RaftStateStore, timeouts ...time.Duration) (*RaftNode, error) {
+	if node == nil {
+		return nil, fmt.Errorf("node cannot be nil")
+	}
+	if stateStore == nil {
+		return nil, fmt.Errorf("raft state store cannot be nil")
+	}
+	state, err := stateStore.LoadRaftState()
+	if err != nil {
+		return nil, fmt.Errorf("load raft state: %w", err)
+	}
+	if state.CurrentTerm > 0 {
+		node.currentTerm = state.CurrentTerm
+	}
+	node.votedFor = NodeID(state.VotedFor)
+	node.log = NewRaftLog()
+	for _, record := range state.Log {
+		if err := node.log.Append(LogEntry{Index: record.Index, Term: record.Term, Command: Command{Type: CommandType(record.Type), Key: record.Key, Value: append([]byte(nil), record.Value...)}}); err != nil {
+			return nil, fmt.Errorf("recover raft log: %w", err)
+		}
+	}
+	rn, err := NewRaftNode(node, peers, transport, clock, timeouts...)
+	if err != nil {
+		return nil, err
+	}
+	rn.storage = stateStore
+	return rn, nil
+}
+
+func (rn *RaftNode) RecoverCommitted(commitIndex uint64) error {
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+	if err := rn.node.AdvanceCommitIndex(commitIndex); err != nil {
+		return err
+	}
+	return rn.applyCommittedEntries()
+}
+
+func (rn *RaftNode) persistState() error {
+	if rn.storage == nil {
+		return nil
+	}
+	state := storage.RaftState{CurrentTerm: rn.node.CurrentTerm(), VotedFor: uint64(rn.node.VotedFor())}
+	for _, entry := range rn.node.Log().EntriesOrEmpty() {
+		state.Log = append(state.Log, storage.RaftLogRecord{Index: entry.Index, Term: entry.Term, Type: uint8(entry.Command.Type), Key: entry.Command.Key, Value: append([]byte(nil), entry.Command.Value...)})
+	}
+	if err := rn.storage.SaveRaftState(state); err != nil {
+		rn.storageError = err
+		return err
+	}
+	rn.storageError = nil
+	return nil
+}
+
+func (rn *RaftNode) restoreDurableState(term uint64, votedFor NodeID, log *RaftLog) {
+	rn.node.mu.Lock()
+	rn.node.currentTerm = term
+	rn.node.votedFor = votedFor
+	rn.node.log = log.Clone()
+	rn.node.mu.Unlock()
+}
+
+func (rn *RaftNode) StorageError() error {
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+	return rn.storageError
+}
+
+func (rn *RaftNode) AppendEntry(entry LogEntry) error {
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+	previous := rn.node.Log()
+	if err := rn.node.AppendEntry(entry); err != nil {
+		return err
+	}
+	if err := rn.persistState(); err != nil {
+		rn.restoreDurableState(rn.node.CurrentTerm(), rn.node.VotedFor(), previous)
+		return err
+	}
+	return nil
 }
 
 func (rn *RaftNode) newElectionTimer() Timer {
@@ -180,9 +266,14 @@ func (rn *RaftNode) handleRequestVote(request RequestVoteRequest) RequestVoteRes
 		return RequestVoteResponse{Term: rn.node.CurrentTerm(), VoteGranted: false}
 	}
 	if request.Term > rn.node.CurrentTerm() {
+		oldTerm, oldVote := rn.node.CurrentTerm(), rn.node.VotedFor()
 		rn.node.AdvanceTerm(request.Term)
 		rn.node.SetState(Follower)
 		rn.stopHeartbeats()
+		if err := rn.persistState(); err != nil {
+			rn.restoreDurableState(oldTerm, oldVote, rn.node.Log())
+			return RequestVoteResponse{Term: oldTerm, VoteGranted: false}
+		}
 		rn.resetElectionTimer()
 	}
 	if rn.node.VotedFor() != NoNode && rn.node.VotedFor() != request.CandidateID {
@@ -191,7 +282,16 @@ func (rn *RaftNode) handleRequestVote(request RequestVoteRequest) RequestVoteRes
 	if !rn.isCandidateUpToDate(request.LastLogIndex, request.LastLogTerm) {
 		return RequestVoteResponse{Term: rn.node.CurrentTerm(), VoteGranted: false}
 	}
-	rn.node.SetVotedFor(request.CandidateID)
+	oldVote := rn.node.VotedFor()
+	if err := rn.node.SetVotedFor(request.CandidateID); err != nil {
+		return RequestVoteResponse{Term: rn.node.CurrentTerm(), VoteGranted: false}
+	}
+	if err := rn.persistState(); err != nil {
+		rn.node.mu.Lock()
+		rn.node.votedFor = oldVote
+		rn.node.mu.Unlock()
+		return RequestVoteResponse{Term: rn.node.CurrentTerm(), VoteGranted: false}
+	}
 	rn.resetElectionTimer()
 	return RequestVoteResponse{Term: rn.node.CurrentTerm(), VoteGranted: true}
 }
@@ -244,10 +344,18 @@ func (rn *RaftNode) startElection() {
 		return
 	}
 
+	oldTerm, oldVote, oldState := rn.node.CurrentTerm(), rn.node.VotedFor(), rn.node.State()
 	rn.node.AdvanceTerm(rn.node.CurrentTerm() + 1)
 	rn.node.SetState(Candidate)
 	rn.electionTerm = rn.node.CurrentTerm()
-	rn.node.SetVotedFor(rn.node.ID())
+	if err := rn.node.SetVotedFor(rn.node.ID()); err != nil {
+		return
+	}
+	if err := rn.persistState(); err != nil {
+		rn.restoreDurableState(oldTerm, oldVote, rn.node.Log())
+		rn.node.SetState(oldState)
+		return
+	}
 	rn.votesReceived = map[NodeID]bool{}
 	rn.resetElectionTimer()
 

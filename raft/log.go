@@ -68,6 +68,14 @@ func (l *RaftLog) Entries(from, to uint64) ([]LogEntry, error) {
 	}
 	return result, nil
 }
+
+func (l *RaftLog) EntriesOrEmpty() []LogEntry {
+	if l.LastIndex() == 0 {
+		return []LogEntry{}
+	}
+	entries, _ := l.Entries(1, l.LastIndex())
+	return entries
+}
 func (l *RaftLog) TruncateFrom(index uint64) error {
 	if index == 0 || index > l.LastIndex()+1 {
 		return fmt.Errorf("%w: %d", ErrIndexOutOfRange, index)
